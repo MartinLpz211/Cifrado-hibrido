@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard</title>
+  <style>
+    body { font-family: Arial; max-width: 600px; margin: 30px auto; padding: 20px; background: #f5f5f5; }
+    .card { background: white; padding: 25px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.1); margin-bottom: 20px; }
+    h1 { margin-top: 0; }
+    h2 { font-size: 18px; margin: 20px 0 10px 0; }
+    .info { background: #e8e4f9; padding: 10px; border-radius: 4px; margin-bottom: 10px; }
+    table { width: 100%; border-collapse: collapse; }
+    table td { padding: 8px; border-bottom: 1px solid #eee; }
+    table td:first-child { color: #666; font-weight: bold; }
+    code { background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-size: 12px; }
+    .key-box { background: #f9f9f9; padding: 12px; border-radius: 4px; border: 1px solid #ddd; word-break: break-all; font-size: 12px; }
+    a { color: #6c63ff; text-decoration: none; }
+    button { padding: 8px 15px; background: #e74c3c; color: white; border: none; border-radius: 4px; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Hola, <%= usuario.nombre %>!</h1>
+    
+    <h2>Información del usuario</h2>
+    <table>
+      <tr><td>Nombre del usuario</td><td><%= usuario.nombre %></td></tr>
+    </table>
+
+    
+    
+    <% if (logs.length > 0) { %>
+    <% } else { %>
+      <p>No hay registros aún.</p>
+    <% } %>
+
+    <p><a href="/logout">Cerrar sesión</a></p>
+  </div>
+</body>
+</html>

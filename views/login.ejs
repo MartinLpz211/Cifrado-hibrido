@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Login</title>
+  <style>
+    body { font-family: Arial; max-width: 420px; margin: 50px auto; padding: 20px; background: #f5f5f5; }
+    .card { background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,.1); }
+    h1 { margin-top: 0; font-size: 20px; }
+    input { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+    button { width: 100%; padding: 10px; background: #4a4a8a; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; }
+    button:hover { background: #3a3a7a; }
+    button:disabled { background: #aaa; }
+    .error   { color: red;   background: #fff0f0; padding: 8px; border-radius: 4px; margin-bottom: 10px; font-size: 14px; }
+    .success { color: green; background: #f0fff0; padding: 8px; border-radius: 4px; margin-bottom: 10px; font-size: 14px; }
+    .info    { background: #eef; padding: 10px; border-radius: 4px; margin-bottom: 14px; font-size: 12px; line-height: 1.6; border-left: 3px solid #4a4a8a; }
+    .payload-box { background: #1a1a1a; color: #00ff88; padding: 10px; border-radius: 4px; font-family: monospace; font-size: 11px; margin-top: 10px; word-break: break-all; display: none; white-space: pre-wrap; }
+    a { color: #4a4a8a; text-decoration: none; font-size: 14px; }
+    label { font-size: 13px; color: #555; display: block; margin-bottom: 4px; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1> Login</h1>
+
+    
+    <div id="alert"></div>
+
+    <label>Email</label>
+    <input type="email" id="email" placeholder="tu@correo.com" required>
+    <label>Password</label>
+    <input type="password" id="password" placeholder="Contraseña" required>
+    <button id="btn" onclick="handleLogin()">Iniciar Sesión</button>
+
+    <div class="payload-box" id="payload-preview"></div>
+
+    <p><a href="/register">¿No tienes cuenta? Registrarse</a></p>
+  </div>
+
+  <script>
+  // ── Usa Web Crypto API nativa del navegador (sin librerías externas) ─────────
+
+  // Convierte hex string a ArrayBuffer
+  function hexToBytes(hex) {
+    const bytes = new Uint8Array(hex.length / 2);
+    for (let i = 0; i < hex.length; i += 2)
+      bytes[i / 2] = parseInt(hex.substr(i, 2), 16);
+    return bytes;
+  }
+
+  // Convierte ArrayBuffer a base64
+  function toBase64(buffer) {
+    return btoa(String.fromCharCode(...new Uint8Array(buffer)));
+  }
+
+  // Convierte ArrayBuffer a hex
+  function toHex(buffer) {
+    return Array.from(new Uint8Array(buffer)).map(b => b.toString(16).padStart(2, '0')).join('');
+  }
+
+  async function cifrarConECC(payload, serverPublicKeyHex) {
+    // 1. Importar clave pública ECC del servidor (formato raw: 04 + X + Y)
+    const serverKeyBytes = hexToBytes(serverPublicKeyHex);
+    const serverCryptoKey = await crypto.subtle.importKey(
+      'raw',
+      serverKeyBytes,
+      { name: 'ECDH', namedCurve: 'P-256' },
+      false,
+      []
+    );
+
+    // 2. Generar par de claves efímeras del cliente (P-256)
+    const clientKeyPair = await crypto.subtle.generateKey(
+      { name: 'ECDH', namedCurve: 'P-256' },
+      true,
+      ['deriveKey', 'deriveBits']
+    );
+
+    // 3. ECDH: derivar secreto compartido
+    const sharedBits = await crypto.subtle.deriveBits(
+      { name: 'ECDH', public: serverCryptoKey },
+      clientKeyPair.privateKey,
+      256
+    );
+
+    // 4. Usar secreto compartido como clave AES-256
+    const aesKey = await crypto.subtle.importKey(
+      'raw', sharedBits, { name: 'AES-CBC' }, false, ['encrypt']
+    );
+
+    // 5. Cifrar el payload
+    const iv = crypto.getRandomValues(new Uint8Array(16));
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-CBC', iv },
+      aesKey,
+      new TextEncoder().encode(JSON.stringify(payload))
+    );
+
+    // 6. Exportar clave pública del cliente para enviar al servidor
+    const clientPublicKeyRaw = await crypto.subtle.exportKey('raw', clientKeyPair.publicKey);
+    const clientPublicKeyHex = toHex(clientPublicKeyRaw);
+
+    return {
+      eccPayload: {
+        iv:   toBase64(iv),
+        data: toBase64(encrypted)
+      },
+      eccClientPublicKey: clientPublicKeyHex
+    };
+  }
+
+  async function handleLogin() {
+    const email    = document.getElementById('email').value.trim();
+    const password = document.getElementById('password').value;
+    const btn      = document.getElementById('btn');
+    const alertEl  = document.getElementById('alert');
+    const preview  = document.getElementById('payload-preview');
+
+    alertEl.innerHTML = '';
+    preview.style.display = 'none';
+
+    if (!email || !password) {
+      alertEl.innerHTML = '<div class="error">Completa todos los campos</div>';
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Cifrando con ECC...';
+
+    try {
+      // 1. Obtener clave pública ECC del servidor
+      const keyRes = await fetch('/api/server-public-key');
+      const { eccPublicKey } = await keyRes.json();
+
+      // 2. Cifrar credenciales con ECC P-256 en el navegador
+      const { eccPayload, eccClientPublicKey } = await cifrarConECC(
+        { email, password },
+        eccPublicKey
+      );
+
+      // 3. Enviar al servidor — Network mostrará el payload cifrado, no las credenciales
+      const res = await fetch('/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ eccPayload, eccClientPublicKey })
+      });
+
+      const data = await res.json();
+
+      if (data.ok) {
+        alertEl.innerHTML = '<div class="success">✅ ' + data.message + '</div>';
+        setTimeout(() => window.location.href = data.redirect, 1200);
+      } else {
+        alertEl.innerHTML = '<div class="error">❌ ' + data.error + '</div>';
+        btn.disabled = false;
+        btn.textContent = 'Iniciar Sesión';
+      }
+
+    } catch (err) {
+      alertEl.innerHTML = '<div class="error">❌ Error: ' + err.message + '</div>';
+      btn.disabled = false;
+      btn.textContent = 'Iniciar Sesión';
+    }
+  }
+
+  document.addEventListener('keydown', e => { if (e.key === 'Enter') handleLogin(); });
+  </script>
+</body>
+</html>
